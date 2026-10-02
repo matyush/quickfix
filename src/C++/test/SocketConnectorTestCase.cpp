@@ -56,8 +56,7 @@ TEST_CASE("SocketConnectorTests") {
     server.close();
   }
 
-#ifndef _MSC_VER
-  SECTION("connect_to_dead_port_fires_disconnect_once") {
+  SECTION("connect_to_dead_port_is_reported_exactly_once") {
     // Bind a server to get a free port, then close it so nothing is listening.
     SocketServer server(0);
     socket_handle serverSocket = server.add(0, true, true);
@@ -66,16 +65,31 @@ TEST_CASE("SocketConnectorTests") {
 
     SocketConnector connector(1);
     SocketConnectorTestStrategy strategy;
-    connector.connect("127.0.0.1", port, false, 1024, 1024);
+    socket_handle socket = connector.connect("127.0.0.1", port, false, 1024, 1024);
 
-    process_sleep(0.1);
-    connector.block(strategy);
-    CHECK(1 == strategy.disconnect);
+    if (socket == INVALID_SOCKET_HANDLE) {
+      // The refusal was detected synchronously (e.g. Linux): the reason is
+      // reported and the socket never entered the monitor, so no events fire.
+      CHECK(false == connector.getLastConnectError().empty());
+      connector.block(strategy);
+      connector.block(strategy);
+      CHECK(0 == strategy.connect);
+      CHECK(0 == strategy.disconnect);
+    } else {
+      // The refusal arrives asynchronously (Windows): the monitor must detect
+      // it and fire onDisconnect exactly once. The RST can take a couple of
+      // seconds to arrive, so keep polling the monitor for a while.
+      for (int i = 0; i < 6 && strategy.disconnect == 0; ++i) {
+        process_sleep(0.1);
+        connector.block(strategy);
+      }
+      CHECK(1 == strategy.disconnect);
 
-    // Second block must not fire disconnect again: the socket must have been
-    // dropped from the monitor when the error was first processed.
-    connector.block(strategy);
-    CHECK(1 == strategy.disconnect);
+      // Further blocks must not fire disconnect again: the socket must have
+      // been dropped from the monitor when the error was first processed.
+      connector.block(strategy);
+      connector.block(strategy);
+      CHECK(1 == strategy.disconnect);
+    }
   }
-#endif
 }

@@ -221,6 +221,17 @@ void SocketMonitor::processWriteSet(Strategy &strategy, fd_set &writeSet) {
   for (unsigned i = 0; i < writeSet.fd_count; ++i) {
     socket_handle s = writeSet.fd_array[i];
     if (m_connectSockets.find(s) != m_connectSockets.end()) {
+      int err = 0;
+      socklen_t len = sizeof(err);
+      getsockopt(s, SOL_SOCKET, SO_ERROR, (char *)&err, &len);
+
+      if (err != 0) {
+        // Report before erasing: onError drops the socket through drop(),
+        // which closes it and fires onDisconnect exactly once.
+        strategy.onError(*this, s);
+        continue;
+      }
+
       m_connectSockets.erase(s);
       m_readSockets.insert(s);
       strategy.onConnect(*this, s);

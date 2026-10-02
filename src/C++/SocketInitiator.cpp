@@ -154,9 +154,21 @@ void SocketInitiator::doConnect(const SessionID &s, const Dictionary &d) {
         m_rcvBufSize,
         host.sourceAddress,
         host.sourcePort);
-    setPending(s);
 
-    m_pendingConnections[result] = new SocketConnection(*this, s, result, &m_connector.getMonitor());
+    if (result != INVALID_SOCKET_HANDLE) {
+      setPending(s);
+
+      m_pendingConnections[result] = new SocketConnection(*this, s, result, &m_connector.getMonitor());
+    } else {
+      // Leave the session in m_disconnected so the next connect() retries
+      // after ReconnectInterval instead of parking it in m_pending forever.
+      const std::string &connectError = m_connector.getLastConnectError();
+      if (!connectError.empty()) {
+        log->onEvent(
+            "Connection to " + host.address + " on port " + IntConvertor::convert((unsigned short)host.port)
+            + " failed: " + connectError);
+      }
+    }
   } catch (std::exception &) {}
 }
 

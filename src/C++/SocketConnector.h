@@ -55,9 +55,11 @@ public:
       Strategy &);
   void block(Strategy &strategy, bool poll = 0, double timeout = 0.0);
   SocketMonitor &getMonitor() { return m_monitor; }
+  const std::string &getLastConnectError() const { return m_lastConnectError; }
 
 private:
   SocketMonitor m_monitor;
+  std::string m_lastConnectError;
 
 public:
   class Strategy {
