@@ -77,6 +77,8 @@ socket_handle SocketConnector::connect(
     int rcvBufSize,
     const std::string &sourceAddress,
     int sourcePort) {
+  m_lastConnectError.clear();
+
   socket_handle socket = socket_createConnector();
 
   if (socket != INVALID_SOCKET_HANDLE) {
@@ -92,8 +94,33 @@ socket_handle SocketConnector::connect(
     if (!sourceAddress.empty() || sourcePort) {
       socket_bind(socket, sourceAddress.c_str(), sourcePort);
     }
+
+    // Connect with the socket already non-blocking so a failed attempt never
+    // stalls the reactor thread; only connects that are still in progress (or
+    // already established) are handed to the monitor.
+    socket_setnonblock(socket);
+#ifndef _MSC_VER
+    // socket_connect returns without setting errno when the host is unknown,
+    // so clear it to avoid acting on a stale EINPROGRESS from an earlier call.
+    errno = 0;
+#endif
+    if (socket_connect(socket, address.c_str(), port) != 0) {
+#ifdef _MSC_VER
+      int error = WSAGetLastError();
+      if (error != WSAEWOULDBLOCK) {
+        m_lastConnectError = error_wsaerror(error);
+        socket_close(socket);
+        return INVALID_SOCKET_HANDLE;
+      }
+#else
+      if (errno != EINPROGRESS) {
+        m_lastConnectError = error_strerror(errno);
+        socket_close(socket);
+        return INVALID_SOCKET_HANDLE;
+      }
+#endif
+    }
     m_monitor.addConnect(socket);
-    socket_connect(socket, address.c_str(), port);
   }
   return socket;
 }
